@@ -48,9 +48,10 @@ export default function IntroPortal({ onLoginSuccess, onClose, isOpen }: IntroPo
     try {
       const res = await fetch("/api/auth/otp", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
         body: JSON.stringify({ email }),
       });
+      if (res.headers.get("content-type")?.includes("text/html")) throw new Error("Proxy error");
       const data = await res.json();
       if (data.success) {
         setOtpSent(true);
@@ -78,11 +79,15 @@ export default function IntroPortal({ onLoginSuccess, onClose, isOpen }: IntroPo
     try {
       const res = await fetch("/api/auth/verify", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
         body: JSON.stringify({ email, code: otpCode }),
       });
+      if (res.headers.get("content-type")?.includes("text/html")) throw new Error("Proxy error");
       const data = await res.json();
       if (data.success) {
+        if (data.token) {
+          localStorage.setItem("authToken", data.token);
+        }
         if (data.registrationRequired) {
           setSuccessMsg("Verification success! Please register your sustainability profile.");
           setActiveTab("register");
@@ -115,7 +120,7 @@ export default function IntroPortal({ onLoginSuccess, onClose, isOpen }: IntroPo
     try {
       const res = await fetch("/api/auth/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
         body: JSON.stringify({
           name,
           email,
@@ -125,8 +130,12 @@ export default function IntroPortal({ onLoginSuccess, onClose, isOpen }: IntroPo
           avatar: regForm.avatar,
         }),
       });
+      if (res.headers.get("content-type")?.includes("text/html")) throw new Error("Proxy error");
       const data = await res.json();
       if (data.success) {
+        if (data.token) {
+          localStorage.setItem("authToken", data.token);
+        }
         setSuccessMsg("Sustainability profile registered successfully!");
         onLoginSuccess(data.user);
         setTimeout(() => {
@@ -170,7 +179,7 @@ export default function IntroPortal({ onLoginSuccess, onClose, isOpen }: IntroPo
               Chennai Sustainability Intelligence
             </h1>
             <p className="text-sm text-[#71717A] leading-relaxed mb-6">
-              Empowering urban researchers, community groups, and citizens with real-time CPCB and TNPCB environmental sensor data across Chennai's 16 dynamic zones.
+              Empowering urban researchers, community groups, and citizens with live environmental sensor data sourced via the WAQI network across Chennai's 16 dynamic zones.
             </p>
 
             {/* Baseline Data Types List */}

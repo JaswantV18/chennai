@@ -77,7 +77,11 @@ export default function App() {
   // Fetch live metrics from Node backend
   const fetchLiveData = async () => {
     try {
-      const res = await fetch("/api/data");
+      const res = await fetch("/api/data", { headers: { "Accept": "application/json" } });
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.includes("text/html")) {
+        throw new Error("Received HTML instead of JSON. The preview proxy might have intercepted the request.");
+      }
       const data = await res.json();
       if (data.success) {
         setZones(data.zones);
@@ -99,7 +103,8 @@ export default function App() {
   // Fetch status and logs
   const fetchSystemMetrics = async () => {
     try {
-      const statusRes = await fetch("/api/status");
+      const statusRes = await fetch("/api/status", { headers: { "Accept": "application/json" } });
+      if (statusRes.headers.get("content-type")?.includes("text/html")) throw new Error("Proxy");
       const statusData = await statusRes.json();
       if (statusData.success) {
         setSystemStatus(statusData);
@@ -114,7 +119,8 @@ export default function App() {
     }
 
     try {
-      const historyRes = await fetch("/api/history");
+      const historyRes = await fetch("/api/history", { headers: { "Accept": "application/json" } });
+      if (historyRes.headers.get("content-type")?.includes("text/html")) throw new Error("Proxy");
       const historyData = await historyRes.json();
       if (historyData.success) {
         setHistoricalLogs(historyData.history);
@@ -158,7 +164,8 @@ export default function App() {
   const triggerManualRefresh = async () => {
     setRefreshing(true);
     try {
-      const res = await fetch("/api/refresh", { method: "POST" });
+      const res = await fetch("/api/refresh", { method: "POST", headers: { "Accept": "application/json" } });
+      if (res.headers.get("content-type")?.includes("text/html")) throw new Error("Proxy");
       const data = await res.json();
       if (data.success) {
         setZones(data.zones);
@@ -182,6 +189,7 @@ export default function App() {
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem("chennai_sustainability_user");
+    localStorage.removeItem("authToken");
   };
 
   // Update user profile profile details
@@ -190,9 +198,14 @@ export default function App() {
     if (!currentUser) return;
 
     try {
+      const token = localStorage.getItem("authToken");
       const res = await fetch("/api/auth/profile/update", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : "",
+          "Accept": "application/json"
+        },
         body: JSON.stringify({
           email: currentUser.email,
           name: profileForm.name,
@@ -202,6 +215,7 @@ export default function App() {
           avatar: profileForm.avatar,
         }),
       });
+      if (res.headers.get("content-type")?.includes("text/html")) throw new Error("Proxy error");
       const data = await res.json();
       if (data.success) {
         handleLoginSuccess(data.user);
@@ -225,15 +239,21 @@ export default function App() {
     const activeZone = zones.find((z) => z.id === selectedZoneId);
 
     try {
+      const token = localStorage.getItem("authToken");
       const res = await fetch("/api/ai/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : "",
+          "Accept": "application/json"
+        },
         body: JSON.stringify({
           prompt: userMsg,
           selectedZoneId: selectedZoneId,
           contextMetrics: activeZone,
         }),
       });
+      if (res.headers.get("content-type")?.includes("text/html")) throw new Error("Proxy error");
       const data = await res.json();
       if (data.success) {
         setChatMessages((prev) => [...prev, { sender: "ai", text: data.text }]);
@@ -261,6 +281,8 @@ export default function App() {
 
   // Helpers to select active details
   const activeZone = zones.find((z) => z.id === selectedZoneId) || zones[0];
+
+  if (zones.length === 0) return <div className="min-h-screen flex items-center justify-center bg-[#09090B] text-white">Loading live environmental data...</div>;
 
   // Compute city-wide averages
   const avgTemp = zones.length ? zones.reduce((acc, z) => acc + z.temp, 0) / zones.length : 33.1;
@@ -535,11 +557,7 @@ export default function App() {
                         : "bg-yellow-500/10 text-yellow-400 border border-yellow-500/20"
                     }`}
                   >
-                    {activeZone.stationType === "caaqms"
-                      ? "CPCB CAAQMS"
-                      : activeZone.stationType === "manual"
-                      ? "TNPCB Manual"
-                      : "Estimated Sensor"}
+                    {activeZone.dataSource}
                   </span>
                   <span>District: {activeZone.region}</span>
                 </div>
@@ -912,7 +930,7 @@ export default function App() {
                   <h4 className="uppercase tracking-wide text-[10px]">Q4: Weather API Provider?</h4>
                 </div>
                 <p className="text-[11px] text-[#71717A] leading-relaxed">
-                  <strong>Answer:</strong> We engineered a high-fidelity <strong>Meteorological Vector Engine</strong>. It utilizes real baseline data from official IMD, TNPCB, and CPCB channels, and computes continuous simulated variations dynamically. This avoids key outages and powers the <strong>Dynamic Climate Canvas</strong> (with real active raindrops, solar glows, and fog layers) perfectly.
+                  <strong>Answer:</strong> We integrate real-time air quality data directly from the <strong>World Air Quality Index (WAQI)</strong> network. This avoids key outages and powers the <strong>Dynamic Climate Canvas</strong> (with real active raindrops, solar glows, and fog layers) perfectly.
                 </p>
               </div>
             </div>

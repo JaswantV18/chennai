@@ -4,14 +4,26 @@ import fs from "fs";
 import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
+import crypto from "crypto";
+import jwt from "jsonwebtoken";
+import rateLimit from "express-rate-limit";
 
 dotenv.config();
 
 const app = express();
 const PORT = 3000;
+const JWT_SECRET = process.env.JWT_SECRET || "fallback-secret-for-dev";
 const DB_FILE = path.join(process.cwd(), "database.json");
 
 app.use(express.json());
+
+// Rate Limiting for Auth endpoints
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // limit each IP to 10 requests per windowMs
+  message: "Too many authentication attempts, please try again later"
+});
+
 
 // Initialize Gemini SDK if API key is present
 let ai: GoogleGenAI | null = null;
@@ -33,23 +45,23 @@ if (process.env.GEMINI_API_KEY) {
 
 // Initial Baseline Data for the 16 Chennai Zones
 const initialZones = [
-  { id: "Z01", name: "T. Nagar", region: "Central", x: 0, z: 0, pop: 185000, density: 28500, area: 6.5, aqi: 88, pm25: 38, pm10: 72, no2: 48, co: 1.9, o3: 33, temp: 33.5, humidity: 72, rainfall: 4.5, vehicles: 145000, vdens: "Very High", green: 8.2, water: 1, dataSource: "TNPCB Manual Station", stationType: "manual", lastReading: "2026-07-20 06:00", oldAqi: 78, oldPm25: 28, oldPm10: 52, oldTemp: 35.2, desc: "Major commercial hub with dense retail markets. TNPCB manual monitoring station shows higher pollution than previously estimated.", recs: ["Implement odd-even vehicle rule during peak hours", "Expand pedestrian-only zones in Pondy Bazaar", "Install vertical gardens on commercial buildings", "Deploy electric bus fleet for local transit"] },
-  { id: "Z02", name: "Anna Nagar", region: "West", x: -3, z: -2, pop: 167000, density: 26800, area: 5.0, aqi: 72, pm25: 30, pm10: 58, no2: 42, co: 1.6, o3: 36, temp: 33.0, humidity: 68, rainfall: 2.1, vehicles: 98000, vdens: "High", green: 18.5, water: 2, dataSource: "TNPCB Manual Station", stationType: "manual", lastReading: "2026-07-20 06:00", oldAqi: 62, oldPm25: 22, oldPm10: 41, oldTemp: 34.1, desc: "Planned residential area with parks. Better air quality than central zones but PM2.5 still 6x WHO guideline.", recs: ["Maintain existing park corridors", "Promote cycling infrastructure", "Solar panel mandate for new buildings", "Rainwater harvesting expansion"] },
-  { id: "Z03", name: "Velachery", region: "South", x: 2, z: 3, pop: 210000, density: 22000, area: 9.5, aqi: 105, pm25: 42, pm10: 75, no2: 50, co: 2.1, o3: 31, temp: 32.8, humidity: 75, rainfall: 12.0, vehicles: 165000, vdens: "Very High", green: 6.8, water: 1, dataSource: "CPCB CAAQMS", stationType: "caaqms", lastReading: "2026-07-20 06:00", oldAqi: 89, oldPm25: 35, oldPm10: 68, oldTemp: 36.5, desc: "Rapidly growing IT corridor. CPCB CAAQMS station shows AQI 105 (Poor) — significantly worse than legacy dashboard estimate.", recs: ["URGENT: Deploy dust suppression at construction sites", "Expand MRTS connectivity to reduce road traffic", "Create buffer green belts along IT corridors", "Smart traffic signal optimization"] },
-  { id: "Z04", name: "Mylapore", region: "Central", x: 1, z: -1, pop: 95000, density: 24000, area: 4.0, aqi: 78, pm25: 30, pm10: 55, no2: 38, co: 1.6, o3: 36, temp: 32.8, humidity: 70, rainfall: 3.2, vehicles: 72000, vdens: "High", green: 12.3, water: 2, dataSource: "TNPCB Manual Station (estimated)", stationType: "estimated", lastReading: "2026-07-20 06:00", oldAqi: 71, oldPm25: 26, oldPm10: 48, oldTemp: 34.8, desc: "Heritage cultural district with historic temples. Moderate density with cultural tourism traffic.", recs: ["Heritage walk zones with vehicle restrictions", "Temple tank restoration for microclimate cooling", "Electric auto-rickshaw fleet", "Cultural district greening program"] },
-  { id: "Z05", name: "Ambattur", region: "West", x: -5, z: -1, pop: 145000, density: 15000, area: 9.7, aqi: 108, pm25: 44, pm10: 78, no2: 52, co: 2.4, o3: 30, temp: 33.0, humidity: 65, rainfall: 1.0, vehicles: 88000, vdens: "Moderate", green: 5.2, water: 0, dataSource: "TNPCB Manual Station", stationType: "manual", lastReading: "2026-07-20 06:00", oldAqi: 95, oldPm25: 38, oldPm10: 72, oldTemp: 37.8, desc: "Major industrial estate. Factory emissions contribute significantly — real AQI 108 vs legacy estimates.", recs: ["CRITICAL: Install continuous emission monitoring (CEMS)", "Mandate scrubbers for industrial chimneys", "Relocate polluting industries outside city", "Create industrial green buffer zones"] },
-  { id: "Z06", name: "Sholinganallur", region: "South", x: 4, z: 5, pop: 125000, density: 12000, area: 10.4, aqi: 65, pm25: 26, pm10: 50, no2: 28, co: 1.2, o3: 40, temp: 32.5, humidity: 78, rainfall: 15.2, vehicles: 65000, vdens: "Moderate", green: 22.0, water: 3, dataSource: "TNPCB Manual Station (estimated)", stationType: "estimated", lastReading: "2026-07-20 06:00", oldAqi: 58, oldPm25: 20, oldPm10: 38, oldTemp: 33.5, desc: "IT corridor with planned development. Lower density, better air quality than central zones.", recs: ["Preserve wetland corridors (Pallikaranai marsh)", "Metro extension to Sholinganallur", "Green building mandate for IT parks", "Electric vehicle charging infrastructure"] },
-  { id: "Z07", name: "Thiruvottiyur", region: "North", x: -1, z: -5, pop: 362000, density: 18000, area: 20.1, aqi: 125, pm25: 50, pm10: 85, no2: 58, co: 2.5, o3: 28, temp: 33.2, humidity: 80, rainfall: 8.0, vehicles: 110000, vdens: "High", green: 4.5, water: 2, dataSource: "TNPCB Manual Station", stationType: "manual", lastReading: "2026-07-20 06:00", oldAqi: 102, oldPm25: 42, oldPm10: 78, oldTemp: 36.2, desc: "Coastal industrial area with port activity. Fishing community + industrial pollution.", recs: ["CRITICAL: Enforce Ennore port emission standards", "Fishing harbor electrification (reduce diesel)", "Coastal afforestation program", "Wastewater treatment before creek discharge"] },
-  { id: "Z08", name: "Manali", region: "North", x: -3, z: -6, pop: 85000, density: 14000, area: 6.1, aqi: 142, pm25: 58, pm10: 95, no2: 62, co: 2.8, o3: 26, temp: 33.5, humidity: 62, rainfall: 0.5, vehicles: 42000, vdens: "Moderate", green: 3.1, water: 0, dataSource: "CPCB CAAQMS", stationType: "caaqms", lastReading: "2026-07-20 06:00", oldAqi: 110, oldPm25: 47, oldPm10: 85, oldTemp: 38.5, desc: "Petrochemical industrial zone. HIGHEST pollution in Chennai per CPCB CAAQMS. AQI 142 (Poor).", recs: ["EMERGENCY: Install real-time pollution monitoring", "Phase out outdated petrochemical units", "Mandatory green belt around refineries", "Health screening for nearby residents"] },
-  { id: "Z09", name: "Adyar", region: "South", x: 3, z: 1, pop: 135000, density: 19000, area: 7.1, aqi: 58, pm25: 24, pm10: 48, no2: 35, co: 1.3, o3: 38, temp: 32.5, humidity: 76, rainfall: 9.5, vehicles: 78000, vdens: "Moderate", green: 25.5, water: 3, dataSource: "TNPCB Manual Station", stationType: "manual", lastReading: "2026-07-20 06:00", oldAqi: 55, oldPm25: 18, oldPm10: 35, oldTemp: 33.8, desc: "Upscale residential with IIT Madras campus. Adyar river and estuary provide natural cooling. Cleanest zone in Chennai.", recs: ["Protect Adyar creek ecosystem", "IIT campus as urban heat island mitigation model", "Expand riverfront greenways", "Bird sanctuary buffer zone enforcement"] },
-  { id: "Z10", name: "Guindy", region: "Central-South", x: 1.5, z: 2, pop: 155000, density: 21000, area: 7.4, aqi: 85, pm25: 34, pm10: 62, no2: 40, co: 1.7, o3: 34, temp: 33.0, humidity: 71, rainfall: 6.0, vehicles: 125000, vdens: "Very High", green: 15.0, water: 1, dataSource: "TNPCB Manual Station (estimated)", stationType: "estimated", lastReading: "2026-07-20 06:00", oldAqi: 74, oldPm25: 27, oldPm10: 50, oldTemp: 35.5, desc: "National park + industrial estate mix. Airport proximity increases noise and transit emissions.", recs: ["Guindy National Park expansion buffer", "Airport green taxiing program", "Industrial estate to eco-park transition", "Metro airport connectivity upgrade"] },
-  { id: "Z11", name: "Porur", region: "West", x: -4, z: 1, pop: 115000, density: 16000, area: 7.2, aqi: 92, pm25: 36, pm10: 65, no2: 44, co: 1.9, o3: 33, temp: 33.2, humidity: 67, rainfall: 1.5, vehicles: 85000, vdens: "High", green: 9.5, water: 1, dataSource: "TNPCB Manual Station (estimated)", stationType: "estimated", lastReading: "2026-07-20 06:00", oldAqi: 82, oldPm25: 31, oldPm10: 58, oldTemp: 36.8, desc: "Emerging residential hub with manufacturing. Rapid development causing suspended dust issues.", recs: ["Construction dust control mandates", "Porur lake restoration project", "Outer Ring Road green corridor", "Mixed-use zoning to reduce commute"] },
-  { id: "Z12", name: "Alandur", region: "South", x: 0.5, z: 3.5, pop: 165000, density: 23000, area: 7.2, aqi: 122, pm25: 46, pm10: 85, no2: 54, co: 2.4, o3: 28, temp: 32.5, humidity: 73, rainfall: 5.5, vehicles: 140000, vdens: "Very High", green: 7.0, water: 0, dataSource: "CPCB CAAQMS Alandur Bus Depot", stationType: "caaqms", lastReading: "2026-07-20 06:00", oldAqi: 92, oldPm25: 36, oldPm10: 65, oldTemp: 36.0, desc: "Metro junction + bus depot hub. CPCB CAAQMS shows AQI 122 (Poor) — 30 points higher than legacy estimates.", recs: ["Metro interchange pedestrianization", "Traffic diverting flyover optimization", "Air purifier towers at junctions", "Last-mile EV connectivity"] },
+{ id: "Z01", name: "T. Nagar", region: "Central", x: 0, z: 0, lat: 13.0418, lng: 80.2341, pop: 185000, density: 28500, area: 6.5, aqi: 88, pm25: 38, pm10: 72, no2: 48, co: 1.9, o3: 33, temp: 33.5, humidity: 72, rainfall: 4.5, vehicles: 145000, vdens: "Very High", green: 8.2, water: 1, dataSource: "TNPCB Manual Station", stationType: "manual", lastReading: "2026-07-20 06:00", oldAqi: 78, oldPm25: 28, oldPm10: 52, oldTemp: 35.2, desc: "Major commercial hub with dense retail markets. TNPCB manual monitoring station shows higher pollution than previously estimated.", recs: ["Implement odd-even vehicle rule during peak hours", "Expand pedestrian-only zones in Pondy Bazaar", "Install vertical gardens on commercial buildings", "Deploy electric bus fleet for local transit"] },
+  { id: "Z02", name: "Anna Nagar", region: "West", x: -3, z: -2, lat: 13.085, lng: 80.2101, pop: 167000, density: 26800, area: 5.0, aqi: 72, pm25: 30, pm10: 58, no2: 42, co: 1.6, o3: 36, temp: 33.0, humidity: 68, rainfall: 2.1, vehicles: 98000, vdens: "High", green: 18.5, water: 2, dataSource: "TNPCB Manual Station", stationType: "manual", lastReading: "2026-07-20 06:00", oldAqi: 62, oldPm25: 22, oldPm10: 41, oldTemp: 34.1, desc: "Planned residential area with parks. Better air quality than central zones but PM2.5 still 6x WHO guideline.", recs: ["Maintain existing park corridors", "Promote cycling infrastructure", "Solar panel mandate for new buildings", "Rainwater harvesting expansion"] },
+  { id: "Z03", name: "Velachery", region: "South", x: 2, z: 3, lat: 12.9774, lng: 80.2231, pop: 210000, density: 22000, area: 9.5, aqi: 105, pm25: 42, pm10: 75, no2: 50, co: 2.1, o3: 31, temp: 32.8, humidity: 75, rainfall: 12.0, vehicles: 165000, vdens: "Very High", green: 6.8, water: 1, dataSource: "CPCB CAAQMS", stationType: "caaqms", lastReading: "2026-07-20 06:00", oldAqi: 89, oldPm25: 35, oldPm10: 68, oldTemp: 36.5, desc: "Rapidly growing IT corridor. CPCB CAAQMS station shows AQI 105 (Poor) — significantly worse than legacy dashboard estimate.", recs: ["URGENT: Deploy dust suppression at construction sites", "Expand MRTS connectivity to reduce road traffic", "Create buffer green belts along IT corridors", "Smart traffic signal optimization"] },
+  { id: "Z04", name: "Mylapore", region: "Central", x: 1, z: -1, lat: 13.0368, lng: 80.2676, pop: 95000, density: 24000, area: 4.0, aqi: 78, pm25: 30, pm10: 55, no2: 38, co: 1.6, o3: 36, temp: 32.8, humidity: 70, rainfall: 3.2, vehicles: 72000, vdens: "High", green: 12.3, water: 2, dataSource: "TNPCB Manual Station (estimated)", stationType: "estimated", lastReading: "2026-07-20 06:00", oldAqi: 71, oldPm25: 26, oldPm10: 48, oldTemp: 34.8, desc: "Heritage cultural district with historic temples. Moderate density with cultural tourism traffic.", recs: ["Heritage walk zones with vehicle restrictions", "Temple tank restoration for microclimate cooling", "Electric auto-rickshaw fleet", "Cultural district greening program"] },
+  { id: "Z05", name: "Ambattur", region: "West", x: -5, z: -1, lat: 13.1143, lng: 80.1548, pop: 145000, density: 15000, area: 9.7, aqi: 108, pm25: 44, pm10: 78, no2: 52, co: 2.4, o3: 30, temp: 33.0, humidity: 65, rainfall: 1.0, vehicles: 88000, vdens: "Moderate", green: 5.2, water: 0, dataSource: "TNPCB Manual Station", stationType: "manual", lastReading: "2026-07-20 06:00", oldAqi: 95, oldPm25: 38, oldPm10: 72, oldTemp: 37.8, desc: "Major industrial estate. Factory emissions contribute significantly — real AQI 108 vs legacy estimates.", recs: ["CRITICAL: Install continuous emission monitoring (CEMS)", "Mandate scrubbers for industrial chimneys", "Relocate polluting industries outside city", "Create industrial green buffer zones"] },
+  { id: "Z06", name: "Sholinganallur", region: "South", x: 4, z: 5, lat: 12.9009, lng: 80.2279, pop: 125000, density: 12000, area: 10.4, aqi: 65, pm25: 26, pm10: 50, no2: 28, co: 1.2, o3: 40, temp: 32.5, humidity: 78, rainfall: 15.2, vehicles: 65000, vdens: "Moderate", green: 22.0, water: 3, dataSource: "TNPCB Manual Station (estimated)", stationType: "estimated", lastReading: "2026-07-20 06:00", oldAqi: 58, oldPm25: 20, oldPm10: 38, oldTemp: 33.5, desc: "IT corridor with planned development. Lower density, better air quality than central zones.", recs: ["Preserve wetland corridors (Pallikaranai marsh)", "Metro extension to Sholinganallur", "Green building mandate for IT parks", "Electric vehicle charging infrastructure"] },
+  { id: "Z07", name: "Thiruvottiyur", region: "North", x: -1, z: -5, lat: 13.1611, lng: 80.3015, pop: 362000, density: 18000, area: 20.1, aqi: 125, pm25: 50, pm10: 85, no2: 58, co: 2.5, o3: 28, temp: 33.2, humidity: 80, rainfall: 8.0, vehicles: 110000, vdens: "High", green: 4.5, water: 2, dataSource: "TNPCB Manual Station", stationType: "manual", lastReading: "2026-07-20 06:00", oldAqi: 102, oldPm25: 42, oldPm10: 78, oldTemp: 36.2, desc: "Coastal industrial area with port activity. Fishing community + industrial pollution.", recs: ["CRITICAL: Enforce Ennore port emission standards", "Fishing harbor electrification (reduce diesel)", "Coastal afforestation program", "Wastewater treatment before creek discharge"] },
+  { id: "Z08", name: "Manali", region: "North", x: -3, z: -6, lat: 13.166, lng: 80.2635, pop: 85000, density: 14000, area: 6.1, aqi: 142, pm25: 58, pm10: 95, no2: 62, co: 2.8, o3: 26, temp: 33.5, humidity: 62, rainfall: 0.5, vehicles: 42000, vdens: "Moderate", green: 3.1, water: 0, dataSource: "CPCB CAAQMS", stationType: "caaqms", lastReading: "2026-07-20 06:00", oldAqi: 110, oldPm25: 47, oldPm10: 85, oldTemp: 38.5, desc: "Petrochemical industrial zone. HIGHEST pollution in Chennai per CPCB CAAQMS. AQI 142 (Poor).", recs: ["EMERGENCY: Install real-time pollution monitoring", "Phase out outdated petrochemical units", "Mandatory green belt around refineries", "Health screening for nearby residents"] },
+  { id: "Z09", name: "Adyar", region: "South", x: 3, z: 1, lat: 13.0012, lng: 80.2565, pop: 135000, density: 19000, area: 7.1, aqi: 58, pm25: 24, pm10: 48, no2: 35, co: 1.3, o3: 38, temp: 32.5, humidity: 76, rainfall: 9.5, vehicles: 78000, vdens: "Moderate", green: 25.5, water: 3, dataSource: "TNPCB Manual Station", stationType: "manual", lastReading: "2026-07-20 06:00", oldAqi: 55, oldPm25: 18, oldPm10: 35, oldTemp: 33.8, desc: "Upscale residential with IIT Madras campus. Adyar river and estuary provide natural cooling. Cleanest zone in Chennai.", recs: ["Protect Adyar creek ecosystem", "IIT campus as urban heat island mitigation model", "Expand riverfront greenways", "Bird sanctuary buffer zone enforcement"] },
+  { id: "Z10", name: "Guindy", region: "Central-South", x: 1.5, z: 2, lat: 13.0067, lng: 80.2206, pop: 155000, density: 21000, area: 7.4, aqi: 85, pm25: 34, pm10: 62, no2: 40, co: 1.7, o3: 34, temp: 33.0, humidity: 71, rainfall: 6.0, vehicles: 125000, vdens: "Very High", green: 15.0, water: 1, dataSource: "TNPCB Manual Station (estimated)", stationType: "estimated", lastReading: "2026-07-20 06:00", oldAqi: 74, oldPm25: 27, oldPm10: 50, oldTemp: 35.5, desc: "National park + industrial estate mix. Airport proximity increases noise and transit emissions.", recs: ["Guindy National Park expansion buffer", "Airport green taxiing program", "Industrial estate to eco-park transition", "Metro airport connectivity upgrade"] },
+  { id: "Z11", name: "Porur", region: "West", x: -4, z: 1, lat: 13.0336, lng: 80.1557, pop: 115000, density: 16000, area: 7.2, aqi: 92, pm25: 36, pm10: 65, no2: 44, co: 1.9, o3: 33, temp: 33.2, humidity: 67, rainfall: 1.5, vehicles: 85000, vdens: "High", green: 9.5, water: 1, dataSource: "TNPCB Manual Station (estimated)", stationType: "estimated", lastReading: "2026-07-20 06:00", oldAqi: 82, oldPm25: 31, oldPm10: 58, oldTemp: 36.8, desc: "Emerging residential hub with manufacturing. Rapid development causing suspended dust issues.", recs: ["Construction dust control mandates", "Porur lake restoration project", "Outer Ring Road green corridor", "Mixed-use zoning to reduce commute"] },
+  { id: "Z12", name: "Alandur", region: "South", x: 0.5, z: 3.5, lat: 12.9964, lng: 80.2014, pop: 165000, density: 23000, area: 7.2, aqi: 122, pm25: 46, pm10: 85, no2: 54, co: 2.4, o3: 28, temp: 32.5, humidity: 73, rainfall: 5.5, vehicles: 140000, vdens: "Very High", green: 7.0, water: 0, dataSource: "CPCB CAAQMS Alandur Bus Depot", stationType: "caaqms", lastReading: "2026-07-20 06:00", oldAqi: 92, oldPm25: 36, oldPm10: 65, oldTemp: 36.0, desc: "Metro junction + bus depot hub. CPCB CAAQMS shows AQI 122 (Poor) — 30 points higher than legacy estimates.", recs: ["Metro interchange pedestrianization", "Traffic diverting flyover optimization", "Air purifier towers at junctions", "Last-mile EV connectivity"] },
   // NEWLY INTEGRATED STATIONS
-  { id: "Z13", name: "Kodungaiyur", region: "North", x: -2, z: -4, pop: 180000, density: 16000, area: 11.2, aqi: 128, pm25: 52, pm10: 88, no2: 58, co: 2.5, o3: 30, temp: 33.2, humidity: 74, rainfall: 3.0, vehicles: 95000, vdens: "High", green: 4.0, water: 1, dataSource: "CPCB CAAQMS", stationType: "caaqms", lastReading: "2026-07-20 06:00", oldAqi: null, oldPm25: null, oldPm10: null, oldTemp: null, desc: "Newly integrated zone containing Chennai's major north dump yard. Official CPCB CAAQMS confirms high pollution levels.", recs: ["CRITICAL: Phase-out of waste dumping in active yards", "Deploy advanced bio-mining reclamation lines", "Continuous monitoring of VOCs and methane", "Establish wide green-belt buffers around landfill borders"] },
-  { id: "Z14", name: "Koyambedu", region: "West", x: -2, z: 0, pop: 220000, density: 20000, area: 11.0, aqi: 118, pm25: 45, pm10: 80, no2: 56, co: 2.3, o3: 29, temp: 33.0, humidity: 69, rainfall: 2.5, vehicles: 180000, vdens: "Very High", green: 6.5, water: 1, dataSource: "CPCB CAAQMS", stationType: "caaqms", lastReading: "2026-07-20 06:00", oldAqi: null, oldPm25: null, oldPm10: null, oldTemp: null, desc: "Newly integrated zone housing Asia's largest wholesale market and bus terminus. Heavy diesel vehicular congestion drives particulate counts.", recs: ["Deploy high-capacity EV charging networks for bus terminals", "Implement solar roofs across Koyambedu market sheds", "Enforce night-time heavy vehicle logistics corridors", "Introduce intelligent traffic routing to prevent idle emissions"] },
-  { id: "Z15", name: "Perungudi", region: "South", x: 3, z: 4, pop: 195000, density: 17000, area: 11.5, aqi: 115, pm25: 48, pm10: 82, no2: 52, co: 2.3, o3: 29, temp: 33.0, humidity: 72, rainfall: 10.5, vehicles: 120000, vdens: "High", green: 8.0, water: 2, dataSource: "CPCB CAAQMS", stationType: "caaqms", lastReading: "2026-07-20 06:00", oldAqi: null, oldPm25: null, oldPm10: null, oldTemp: null, desc: "Newly integrated zone containing the massive southern landfill and tech-park developments. Prone to seasonal smoldering events.", recs: ["URGENT: Install automated thermal alert lines for early landfill fire detection", "Expedite biomining processes in older waste cells", "Upgrade leachate treatment capacity to prevent ground contamination", "Mandate green architectural standards for adjoining IT campuses"] },
-  { id: "Z16", name: "Kathivakkam", region: "North", x: -4, z: -5, pop: 95000, density: 13000, area: 7.3, aqi: 135, pm25: 55, pm10: 92, no2: 60, co: 2.6, o3: 27, temp: 33.2, humidity: 77, rainfall: 0.5, vehicles: 55000, vdens: "Moderate", green: 3.5, water: 2, dataSource: "CPCB CAAQMS", stationType: "caaqms", lastReading: "2026-07-20 06:00", oldAqi: null, oldPm25: null, oldPm10: null, oldTemp: null, desc: "Newly integrated zone on the northern tip near major port terminals and power generation complexes.", recs: ["EMERGENCY: Mandate dry-sorbent injection systems on thermal stacks", "Electrify container handling equipment inside industrial terminals", "Restore coastal mangrove buffers to act as natural aerosol filters", "Implement localized community healthcare checkups for respiratory health"] }
+  { id: "Z13", name: "Kodungaiyur", region: "North", x: -2, z: -4, lat: 13.1362, lng: 80.2467, pop: 180000, density: 16000, area: 11.2, aqi: 128, pm25: 52, pm10: 88, no2: 58, co: 2.5, o3: 30, temp: 33.2, humidity: 74, rainfall: 3.0, vehicles: 95000, vdens: "High", green: 4.0, water: 1, dataSource: "CPCB CAAQMS", stationType: "caaqms", lastReading: "2026-07-20 06:00", oldAqi: null, oldPm25: null, oldPm10: null, oldTemp: null, desc: "Newly integrated zone containing Chennai's major north dump yard. Official CPCB CAAQMS confirms high pollution levels.", recs: ["CRITICAL: Phase-out of waste dumping in active yards", "Deploy advanced bio-mining reclamation lines", "Continuous monitoring of VOCs and methane", "Establish wide green-belt buffers around landfill borders"] },
+  { id: "Z14", name: "Koyambedu", region: "West", x: -2, z: 0, lat: 13.0682, lng: 80.1906, pop: 220000, density: 20000, area: 11.0, aqi: 118, pm25: 45, pm10: 80, no2: 56, co: 2.3, o3: 29, temp: 33.0, humidity: 69, rainfall: 2.5, vehicles: 180000, vdens: "Very High", green: 6.5, water: 1, dataSource: "CPCB CAAQMS", stationType: "caaqms", lastReading: "2026-07-20 06:00", oldAqi: null, oldPm25: null, oldPm10: null, oldTemp: null, desc: "Newly integrated zone housing Asia's largest wholesale market and bus terminus. Heavy diesel vehicular congestion drives particulate counts.", recs: ["Deploy high-capacity EV charging networks for bus terminals", "Implement solar roofs across Koyambedu market sheds", "Enforce night-time heavy vehicle logistics corridors", "Introduce intelligent traffic routing to prevent idle emissions"] },
+  { id: "Z15", name: "Perungudi", region: "South", x: 3, z: 4, lat: 12.9654, lng: 80.2458, pop: 195000, density: 17000, area: 11.5, aqi: 115, pm25: 48, pm10: 82, no2: 52, co: 2.3, o3: 29, temp: 33.0, humidity: 72, rainfall: 10.5, vehicles: 120000, vdens: "High", green: 8.0, water: 2, dataSource: "CPCB CAAQMS", stationType: "caaqms", lastReading: "2026-07-20 06:00", oldAqi: null, oldPm25: null, oldPm10: null, oldTemp: null, desc: "Newly integrated zone containing the massive southern landfill and tech-park developments. Prone to seasonal smoldering events.", recs: ["URGENT: Install automated thermal alert lines for early landfill fire detection", "Expedite biomining processes in older waste cells", "Upgrade leachate treatment capacity to prevent ground contamination", "Mandate green architectural standards for adjoining IT campuses"] },
+  { id: "Z16", name: "Kathivakkam", region: "North", x: -4, z: -5, lat: 13.2085, lng: 80.3201, pop: 95000, density: 13000, area: 7.3, aqi: 135, pm25: 55, pm10: 92, no2: 60, co: 2.6, o3: 27, temp: 33.2, humidity: 77, rainfall: 0.5, vehicles: 55000, vdens: "Moderate", green: 3.5, water: 2, dataSource: "CPCB CAAQMS", stationType: "caaqms", lastReading: "2026-07-20 06:00", oldAqi: null, oldPm25: null, oldPm10: null, oldTemp: null, desc: "Newly integrated zone on the northern tip near major port terminals and power generation complexes.", recs: ["EMERGENCY: Mandate dry-sorbent injection systems on thermal stacks", "Electrify container handling equipment inside industrial terminals", "Restore coastal mangrove buffers to act as natural aerosol filters", "Implement localized community healthcare checkups for respiratory health"] }
 ];
 
 // Helper to load and save data securely
@@ -118,72 +130,108 @@ function saveDB(db: Database) {
 }
 
 function generateMockHistory() {
-  const historyList = [];
-  const now = new Date();
-  for (let i = 24; i >= 0; i--) {
-    const time = new Date(now.getTime() - i * 3600000);
-    const timeStr = time.toISOString().replace("T", " ").substring(0, 16);
-    historyList.push({
-      timestamp: timeStr,
-      metrics: initialZones.map((z) => {
-        // Apply slight randomized fluctuations for history
-        const f = 1 + (Math.random() * 0.15 - 0.075);
-        return {
-          zoneId: z.id,
-          aqi: Math.round(z.aqi * f),
-          temp: parseFloat((z.temp * f).toFixed(1)),
-          humidity: Math.round(Math.min(z.humidity * f, 100)),
-          rainfall: parseFloat((z.rainfall * f).toFixed(1)),
-          vehicles: Math.round(z.vehicles * f),
-        };
-      }),
-    });
-  }
-  return historyList;
+  return [];
 }
 
 const db = initDB();
 
-// Simulated weather engine fluctuations
-function applyFluctuations() {
+// Initial fetch on server start
+fetchRealWaqiData();
+
+function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
+  const R = 6371; // Radius of the earth in km
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const a = 
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * 
+    Math.sin(dLon / 2) * Math.sin(dLon / 2); 
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); 
+  return R * c; 
+}
+
+async function fetchRealWaqiData() {
+  const token = process.env.WAQI_API_TOKEN;
+  if (!token) {
+    console.log("WAQI_API_TOKEN not found, skipping fetch. (Please set it in .env)");
+    return;
+  }
+  
   const now = new Date();
   const timeStr = now.toISOString().replace("T", " ").substring(0, 16);
+  let anyUpdates = false;
 
-  db.zones = db.zones.map((z) => {
-    const changeFactor = 1 + (Math.random() * 0.12 - 0.06); // +/- 6% variation
-    const aqiOffset = Math.round(Math.random() * 8 - 4); // +/- 4 units
-    const tempOffset = parseFloat((Math.random() * 1.2 - 0.6).toFixed(1)); // +/- 0.6 C
-    const humOffset = Math.round(Math.random() * 6 - 3); // +/- 3%
+  const promises = db.zones.map(async (z) => {
+    try {
+      const lat = (z as any).lat;
+      const lng = (z as any).lng;
+      if (!lat || !lng) return;
 
-    return {
-      ...z,
-      aqi: Math.max(10, Math.min(350, Math.round(z.aqi + aqiOffset))),
-      pm25: Math.max(5, Math.min(150, Math.round(z.pm25 * changeFactor))),
-      pm10: Math.max(10, Math.min(250, Math.round(z.pm10 * changeFactor))),
-      temp: parseFloat(Math.max(15, Math.min(48, z.temp + tempOffset)).toFixed(1)),
-      humidity: Math.max(10, Math.min(100, z.humidity + humOffset)),
-      rainfall: parseFloat(Math.max(0, z.rainfall + (Math.random() * 2 - 0.9)).toFixed(1)),
-      vehicles: Math.max(1000, Math.round(z.vehicles * changeFactor)),
-      lastReading: timeStr,
-    };
+      const res = await fetch(`https://api.waqi.info/feed/geo:${lat};${lng}/?token=${token}`);
+      const json = await res.json();
+      
+      if (json.status === "ok" && json.data) {
+        const d = json.data;
+        
+        let isEstimated = false;
+        if (d.city && d.city.geo) {
+            const stLat = d.city.geo[0];
+            const stLon = d.city.geo[1];
+            const dist = getDistanceFromLatLonInKm(lat, lng, stLat, stLon);
+            if (dist > 15) { 
+                isEstimated = true;
+            }
+        }
+        
+        const iaqi = d.iaqi || {};
+        const safeVal = (obj, fallback) => (obj && typeof obj.v === 'number') ? obj.v : fallback;
+
+        z.aqi = typeof d.aqi === 'number' ? d.aqi : z.aqi;
+        z.pm25 = safeVal(iaqi.pm25, z.pm25);
+        z.pm10 = safeVal(iaqi.pm10, z.pm10);
+        z.no2 = safeVal(iaqi.no2, z.no2);
+        z.co = safeVal(iaqi.co, z.co);
+        z.o3 = safeVal(iaqi.o3, z.o3);
+        z.temp = safeVal(iaqi.t, z.temp);
+        z.humidity = safeVal(iaqi.h, z.humidity);
+        
+        z.lastReading = timeStr;
+        const stationName = d.city ? d.city.name : "WAQI Station";
+        const attribution = d.attributions && d.attributions.length > 0 ? d.attributions[0].name : "WAQI";
+        
+        if (isEstimated) {
+            z.stationType = "estimated";
+            z.dataSource = `${stationName} (estimated from regional average - no live station nearby)`;
+        } else {
+            z.stationType = "caaqms";
+            z.dataSource = `${stationName} (${attribution})`;
+        }
+        anyUpdates = true;
+      }
+    } catch (e) {
+      console.error(`Failed to fetch WAQI for zone ${z.name}:`, (e as Error).message);
+    }
   });
 
-  // Keep max 48 records of history
-  db.history.push({
-    timestamp: timeStr,
-    metrics: db.zones.map((z) => ({
-      zoneId: z.id,
-      aqi: z.aqi,
-      temp: z.temp,
-      humidity: z.humidity,
-      rainfall: z.rainfall,
-      vehicles: z.vehicles,
-    })),
-  });
-  if (db.history.length > 48) {
-    db.history.shift();
+  await Promise.allSettled(promises);
+  
+  if (anyUpdates) {
+    db.history.push({
+      timestamp: timeStr,
+      metrics: db.zones.map((z) => ({
+        zoneId: z.id,
+        aqi: z.aqi,
+        temp: z.temp,
+        humidity: z.humidity,
+        rainfall: z.rainfall,
+        vehicles: z.vehicles,
+      })),
+    });
+    if (db.history.length > 48) {
+      db.history.shift();
+    }
+    saveDB(db);
   }
-  saveDB(db);
 }
 
 // 15 minutes = 900 seconds auto-refresh countdown simulation on the server
@@ -192,7 +240,7 @@ setInterval(() => {
   currentCountdown--;
   if (currentCountdown <= 0) {
     console.log("Auto-refreshing metrics via simulated real data API variations...");
-    applyFluctuations();
+    fetchRealWaqiData();
     currentCountdown = 900;
   }
 }, 1000);
@@ -210,12 +258,12 @@ app.get("/api/data", (req, res) => {
 });
 
 // 2. Trigger Manual Refresh API
-app.post("/api/refresh", (req, res) => {
-  applyFluctuations();
+app.post("/api/refresh", async (req, res) => {
+  await fetchRealWaqiData();
   currentCountdown = 900; // Reset countdown
   res.json({
     success: true,
-    message: "Manually synchronized with CPCB & TNPCB networks successfully.",
+    message: "Manually synchronized with WAQI network successfully.",
     zones: db.zones,
     countdown: currentCountdown,
   });
@@ -256,15 +304,33 @@ app.get("/api/status", (req, res) => {
   });
 });
 
+// Authentication Middleware
+const authenticateToken = (req: any, res: any, next: any) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ success: false, message: "Access denied. No token provided." });
+  }
+
+  jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
+    if (err) {
+      return res.status(403).json({ success: false, message: "Invalid or expired token." });
+    }
+    req.user = user;
+    next();
+  });
+};
+
 // 6. PASSWORDLESS AUTHENTICATION: Send Email OTP
-app.post("/api/auth/otp", (req, res) => {
+app.post("/api/auth/otp", authLimiter, (req, res) => {
   const { email } = req.body;
   if (!email || !email.includes("@")) {
     return res.status(400).json({ success: false, message: "Valid Email address is required." });
   }
 
   // Generate 6-digit cryptographic OTP
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const code = crypto.randomInt(100000, 1000000).toString();
   const expiresAt = Date.now() + 5 * 60000; // 5 minutes expiration
 
   // Remove existing OTP for this email
@@ -274,7 +340,6 @@ app.post("/api/auth/otp", (req, res) => {
 
   // Production dispatch architecture info:
   // In a production build, developers integrate SendGrid, AWS SES or Python smtplib with secure SMTP.
-  // In development/AI Studio preview, we log it clearly to container logs and expose it safely in response metadata.
   console.log(`\n==============================================\n[SECURE EMAIL OTP SERVICE]`);
   console.log(`To: ${email}`);
   console.log(`Code: ${code}`);
@@ -284,13 +349,11 @@ app.post("/api/auth/otp", (req, res) => {
   res.json({
     success: true,
     message: "Email OTP dispatched successfully.",
-    // Safe debug support for immediate sandbox testing without checking terminal log:
-    debugCode: code, 
   });
 });
 
 // 7. PASSWORDLESS AUTHENTICATION: Verify OTP and Login
-app.post("/api/auth/verify", (req, res) => {
+app.post("/api/auth/verify", authLimiter, (req, res) => {
   const { email, code } = req.body;
   if (!email || !code) {
     return res.status(400).json({ success: false, message: "Email and OTP code are required." });
@@ -314,11 +377,14 @@ app.post("/api/auth/verify", (req, res) => {
   // Check if user exists
   let user = db.users.find((u) => u.email === email);
   let isNewUser = false;
+  let token = null;
+
   if (!user) {
     // If not exists, return with registrationRequired flag
     isNewUser = true;
   } else {
     user.isVerified = true;
+    token = jwt.sign({ email: user.email }, JWT_SECRET, { expiresIn: '24h' });
   }
   saveDB(db);
 
@@ -327,11 +393,12 @@ app.post("/api/auth/verify", (req, res) => {
     message: "OTP verified successfully.",
     registrationRequired: isNewUser,
     user: user || null,
+    token: token
   });
 });
 
 // 8. PASSWORDLESS AUTHENTICATION: Register New Profile
-app.post("/api/auth/register", (req, res) => {
+app.post("/api/auth/register", authLimiter, (req, res) => {
   const { name, email, phone, age, occupation, avatar } = req.body;
 
   if (!name || !email || !phone || !age || !occupation) {
@@ -362,16 +429,20 @@ app.post("/api/auth/register", (req, res) => {
   }
   saveDB(db);
 
+  const token = jwt.sign({ email: user.email }, JWT_SECRET, { expiresIn: '24h' });
+
   res.json({
     success: true,
     message: "Profile registered successfully.",
     user,
+    token
   });
 });
 
 // 9. Update User Profile Avatar
-app.post("/api/auth/profile/update", (req, res) => {
-  const { email, name, phone, age, occupation, avatar } = req.body;
+app.post("/api/auth/profile/update", authenticateToken, (req: any, res: any) => {
+  const { name, phone, age, occupation, avatar } = req.body;
+  const email = req.user.email; // Extracted from JWT
   const user = db.users.find((u) => u.email === email);
   if (!user) {
     return res.status(404).json({ success: false, message: "User not found." });

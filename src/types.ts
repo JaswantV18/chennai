@@ -4,6 +4,8 @@ export interface ZoneData {
   region: string;
   x: number;
   z: number;
+  lat: number;
+  lng: number;
   pop: number;
   density: number;
   area: number;
