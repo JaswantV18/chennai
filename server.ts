@@ -11,6 +11,7 @@ import rateLimit from "express-rate-limit";
 dotenv.config();
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = 3000;
 const JWT_SECRET = process.env.JWT_SECRET || "fallback-secret-for-dev";
 const DB_FILE = path.join(process.cwd(), "database.json");
@@ -21,7 +22,17 @@ app.use(express.json());
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10, // limit each IP to 10 requests per windowMs
-  message: "Too many authentication attempts, please try again later"
+  message: "Too many authentication attempts, please try again later",
+  validate: { trustProxy: false, xForwardedForHeader: false },
+  keyGenerator: (req) => {
+    // If running behind a proxy like in AI Studio, prefer x-forwarded-for
+    const xForwardedFor = req.headers['x-forwarded-for'];
+    if (xForwardedFor) {
+      if (Array.isArray(xForwardedFor)) return xForwardedFor[0];
+      return xForwardedFor.split(',')[0];
+    }
+    return req.ip || "unknown_ip";
+  }
 });
 
 
@@ -235,13 +246,13 @@ async function fetchRealWaqiData() {
 }
 
 // 15 minutes = 900 seconds auto-refresh countdown simulation on the server
-let currentCountdown = 900;
+let currentCountdown = 1800;
 setInterval(() => {
   currentCountdown--;
   if (currentCountdown <= 0) {
     console.log("Auto-refreshing metrics via simulated real data API variations...");
     fetchRealWaqiData();
-    currentCountdown = 900;
+    currentCountdown = 1800;
   }
 }, 1000);
 
@@ -260,7 +271,7 @@ app.get("/api/data", (req, res) => {
 // 2. Trigger Manual Refresh API
 app.post("/api/refresh", async (req, res) => {
   await fetchRealWaqiData();
-  currentCountdown = 900; // Reset countdown
+  currentCountdown = 1800; // Reset countdown
   res.json({
     success: true,
     message: "Manually synchronized with WAQI network successfully.",
@@ -349,6 +360,7 @@ app.post("/api/auth/otp", authLimiter, (req, res) => {
   res.json({
     success: true,
     message: "Email OTP dispatched successfully.",
+    debugCode: code,
   });
 });
 
