@@ -9,8 +9,10 @@ import {
 } from "./types";
 import ChennaiMap from "./components/ChennaiMap";
 import IntroPortal from "./components/IntroPortal";
+import SitePlannerModal from "./components/SitePlannerModal";
+import ZoneDetailsCard from "./components/ZoneDetailsCard";
 import {
-  MapPin,
+  MapPin, Map,
   AlertTriangle,
   Wind,
   Thermometer,
@@ -37,6 +39,8 @@ export default function App() {
   const [zones, setZones] = useState<ZoneData[]>([]);
   const [selectedMetric, setSelectedMetric] = useState<SelectedMetric>("aqi");
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>("Z01");
+  const [timeOfDay, setTimeOfDay] = useState<"Morning" | "Afternoon" | "Evening" | "Night">("Morning");
+  const [compareZoneId, setCompareZoneId] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number>(900);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -50,6 +54,7 @@ export default function App() {
   const [introPortalOpen, setIntroPortalOpen] = useState(true);
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [faqModalOpen, setFaqModalOpen] = useState(false);
+  const [sitePlannerOpen, setSitePlannerOpen] = useState(false);
 
   // System status and logs
   const [systemStatus, setSystemStatus] = useState<any>(null);
@@ -280,7 +285,28 @@ export default function App() {
   };
 
   // Helpers to select active details
-  const activeZone = zones.find((z) => z.id === selectedZoneId) || zones[0];
+  
+  const getSimulatedZone = (z: ZoneData) => {
+    let tMult = 1, vMult = 1, aMult = 1;
+    if (timeOfDay === "Morning") { tMult = 0.9; vMult = 1.2; aMult = 1.1; }
+    else if (timeOfDay === "Afternoon") { tMult = 1.15; vMult = 0.8; aMult = 1.0; }
+    else if (timeOfDay === "Evening") { tMult = 1.0; vMult = 1.3; aMult = 1.2; }
+    else if (timeOfDay === "Night") { tMult = 0.8; vMult = 0.2; aMult = 0.8; }
+    
+    return {
+      ...z,
+      temp: z.temp * tMult,
+      vehicles: z.vehicles * vMult,
+      aqi: Math.round(z.aqi * aMult),
+      pm25: Math.round(z.pm25 * aMult),
+      pm10: Math.round(z.pm10 * aMult),
+    };
+  };
+
+  const simulatedZones = zones.map(getSimulatedZone);
+  const activeZone = simulatedZones.find((z) => z.id === selectedZoneId) || simulatedZones[0];
+  const compareZone = compareZoneId ? simulatedZones.find((z) => z.id === compareZoneId) : null;
+
 
   if (zones.length === 0) return <div className="min-h-screen flex items-center justify-center bg-[#09090B] text-white">Loading live environmental data...</div>;
 
@@ -374,8 +400,31 @@ export default function App() {
               <option value="density">Population Density (/km2)</option>
             </select>
           </div>
+          <div className="relative mt-3">
+            <label className="text-[10px] uppercase text-[#71717A] absolute -top-4 left-0">Time of Day (Sim)</label>
+            <select
+              value={timeOfDay}
+              onChange={(e) => setTimeOfDay(e.target.value as any)}
+              className="bg-[#1C1D24] border border-[#2D2D35] text-sm rounded px-3 py-1.5 w-32 focus:outline-none focus:ring-1 focus:ring-[#3B82F6] cursor-pointer"
+            >
+              <option value="Morning">Morning</option>
+              <option value="Afternoon">Afternoon</option>
+              <option value="Evening">Evening</option>
+              <option value="Night">Night</option>
+            </select>
+          </div>
+
 
           {/* User Identity & Admin Panel buttons */}
+          <div className="flex items-center gap-3 pr-6">
+            <button
+              onClick={() => setSitePlannerOpen(true)}
+              className="px-3 py-1.5 rounded-full bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 border border-indigo-500/30 text-sm font-medium flex items-center gap-2 transition-colors"
+            >
+              <Map className="w-4 h-4" />
+              Site Planner
+            </button>
+          </div>
           <div className="flex items-center gap-3 pl-6 border-l border-[#2D2D35]">
             <button
               onClick={() => setFaqModalOpen(true)}
@@ -438,7 +487,7 @@ export default function App() {
         <div className="absolute inset-0 z-0 bg-[#050505]">
           {zones.length > 0 ? (
             <ChennaiMap
-              zones={zones}
+              zones={simulatedZones}
               selectedMetric={selectedMetric}
               selectedZoneId={selectedZoneId}
               onSelectZone={(id) => setSelectedZoneId(id)}
@@ -535,113 +584,38 @@ export default function App() {
         </aside>
 
         {/* RIGHT COLUMN: DETAIL DATA REPORT PANELS (Floating) */}
-        <aside className="absolute top-4 right-4 bottom-4 w-[350px] border border-[#2D2D35] bg-[#0E0F14]/90 backdrop-blur-md rounded shadow-2xl p-4 flex flex-col shrink-0 overflow-y-auto no-scrollbar z-10 pointer-events-auto hidden md:flex">
-          {activeZone ? (
-            <div className="space-y-4">
-              {/* Header district detail */}
-              <div className="flex flex-col gap-1 pb-2 border-b border-[#2D2D35]">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-[11px] font-bold text-[#71717A] uppercase tracking-widest">
-                    Zone Breakdown
-                  </h3>
-                  <span className="font-mono text-[10px] text-[#3B82F6]">{activeZone.id}</span>
-                </div>
-                <p className="text-xs text-white opacity-80">{activeZone.name} Monitoring Station</p>
-                <div className="flex items-center gap-1.5 mt-1 text-[10px] text-[#71717A]">
-                  <span
-                    className={`px-1.5 py-0.5 rounded text-[8px] font-mono uppercase ${
-                      activeZone.stationType === "caaqms"
-                        ? "bg-green-500/10 text-green-400 border border-green-500/20"
-                        : activeZone.stationType === "manual"
-                        ? "bg-blue-500/10 text-blue-400 border border-blue-500/20"
-                        : "bg-yellow-500/10 text-yellow-400 border border-yellow-500/20"
-                    }`}
-                  >
-                    {activeZone.dataSource}
-                  </span>
-                  <span>District: {activeZone.region}</span>
-                </div>
+        <aside className={`absolute top-4 right-4 bottom-4 ${compareZoneId ? "w-[700px]" : "w-[350px]"} border border-[#2D2D35] bg-[#0E0F14]/90 backdrop-blur-md rounded shadow-2xl p-4 flex flex-col shrink-0 overflow-y-auto no-scrollbar z-10 pointer-events-auto hidden md:flex transition-all duration-300`}>
+          
+          {/* Compare Zone Selector */}
+          <div className="mb-4 pb-4 border-b border-[#2D2D35] flex items-center justify-between">
+            <h3 className="text-xs font-bold text-white tracking-widest uppercase">Compare Zones</h3>
+            <select
+              value={compareZoneId || ""}
+              onChange={(e) => setCompareZoneId(e.target.value === "" ? null : e.target.value)}
+              className="bg-[#1C1D24] border border-[#2D2D35] text-xs rounded px-2 py-1 w-40 focus:outline-none focus:ring-1 focus:ring-[#3B82F6] cursor-pointer"
+            >
+              <option value="">-- No Comparison --</option>
+              {zones.filter(z => z.id !== selectedZoneId).map(z => (
+                <option key={z.id} value={z.id}>{z.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className={`flex gap-4 mb-4 ${compareZoneId ? 'flex-row' : 'flex-col'}`}>
+            {activeZone && (
+              <div className={compareZoneId ? "w-1/2" : "w-full"}>
+                <ZoneDetailsCard zone={activeZone} />
               </div>
-
-              <p className="text-xs text-[#A1A1AA] leading-relaxed">
-                {activeZone.desc}
-              </p>
-
-              {/* Bento Grid Metrics -> converted to High Density Pollutant Breakdown layout style */}
-              <div className="flex flex-col gap-3 pt-2">
-                 <div className="flex justify-between items-end border-b border-[#2D2D35] pb-2">
-                    <div className="flex-1 mr-4">
-                      <span className="text-[10px] text-[#71717A]">PM2.5 & PM10 (ug/m³)</span>
-                      <div className="h-1.5 w-full bg-[#2D2D35] rounded-full mt-1 overflow-hidden flex">
-                         <div className="bg-green-500 h-full" style={{ width: `${Math.min((activeZone.pm25 / 60) * 100, 100)}%` }}></div>
-                         <div className="bg-yellow-500 h-full" style={{ width: `${Math.min((activeZone.pm10 / 100) * 100, 100)}%` }}></div>
-                      </div>
-                    </div>
-                    <span className="text-sm font-mono text-[#E0E0E0]">{activeZone.pm25} / {activeZone.pm10}</span>
-                 </div>
-                 
-                 <div className="flex justify-between items-end border-b border-[#2D2D35] pb-2">
-                    <div className="flex-1 mr-4">
-                      <span className="text-[10px] text-[#71717A]">Temperature & Humidity</span>
-                      <div className="h-1.5 w-full bg-[#2D2D35] rounded-full mt-1 overflow-hidden">
-                         <div className="bg-orange-500 h-full" style={{ width: `${Math.min((activeZone.temp / 45) * 100, 100)}%` }}></div>
-                      </div>
-                    </div>
-                    <span className="text-sm font-mono text-[#E0E0E0]">{activeZone.temp}°C / {activeZone.humidity}%</span>
-                 </div>
-                 
-                 <div className="flex justify-between items-end border-b border-[#2D2D35] pb-2">
-                    <div className="flex-1 mr-4">
-                      <span className="text-[10px] text-[#71717A]">Active Transits</span>
-                      <div className="h-1.5 w-full bg-[#2D2D35] rounded-full mt-1 overflow-hidden">
-                         <div className="bg-[#3B82F6] h-full" style={{ width: `${Math.min((activeZone.vehicles / 50000) * 100, 100)}%` }}></div>
-                      </div>
-                    </div>
-                    <span className="text-sm font-mono text-[#E0E0E0]">{(activeZone.vehicles / 1000).toFixed(0)}k</span>
-                 </div>
+            )}
+            
+            {compareZoneId && compareZone && (
+              <div className="w-1/2 border-l border-[#2D2D35] pl-4">
+                <ZoneDetailsCard zone={compareZone} />
               </div>
-
-              {/* Machine Learning / Random Forest Prediction Predictor */}
-              <div className="mt-2 flex flex-col gap-2">
-                <h3 className="text-[11px] font-bold text-[#71717A] uppercase tracking-widest flex items-center gap-1.5">
-                  <Sparkles className="w-3 h-3 text-[#3B82F6]" /> ML Forest Classifier
-                </h3>
-                <div className="h-20 bg-[#16171D] border border-[#2D2D35] rounded flex items-center justify-between px-3 py-2">
-                  <div>
-                    <span className="text-[9px] font-mono text-[#71717A]">PREDICTED SENSOR AQI</span>
-                    <div className="text-base font-bold text-[#3B82F6] mt-0.5">
-                      {Math.round(activeZone.aqi * 0.96 + 4)}
-                    </div>
-                  </div>
-                  <div className="text-right text-[8px] font-mono text-[#52525B]">
-                    <div>R² Score: 0.755</div>
-                    <div>RMSE Error: 15.05</div>
-                  </div>
-                </div>
-                <p className="text-[8px] text-[#52525B] leading-normal mt-0.5">
-                  Regression trained continuously on raw telemetry feeds to forecast diurnal shifts.
-                </p>
-              </div>
-
-              {/* AI Policy Recommendations */}
-              <div className="mt-auto p-3 bg-blue-500/5 border border-blue-500/20 rounded-md">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-                  </span>
-                  <span className="text-[10px] font-bold text-blue-400 tracking-wider">AI METEOROLOGICAL ADVISORY</span>
-                </div>
-                <div className="space-y-1.5">
-                  {activeZone.recs.map((rec, i) => (
-                    <p key={i} className="text-[10px] text-[#A1A1AA] leading-relaxed">
-                      • {rec}
-                    </p>
-                  ))}
-                </div>
-              </div>
-
-              {/* INTEGRATED CHENNAI SUSTAINABILITY AI CHAT */}
+            )}
+          </div>
+          
+{/* INTEGRATED CHENNAI SUSTAINABILITY AI CHAT */}
               <div className="bg-[#16171D] border border-[#2D2D35] rounded p-3 space-y-3.5">
                 <div className="flex items-center gap-1.5">
                   <MessageSquare className="w-3.5 h-3.5 text-[#3B82F6]" />
@@ -694,12 +668,6 @@ export default function App() {
                   </button>
                 </form>
               </div>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-20 text-[#52525B] font-mono text-xs">
-              Select any Chennai zone to examine.
-            </div>
-          )}
         </aside>
       </main>
 
@@ -873,6 +841,7 @@ export default function App() {
       )}
 
       {/* System Architecture FAQ Modal */}
+      <SitePlannerModal isOpen={sitePlannerOpen} onClose={() => setSitePlannerOpen(false)} />
       {faqModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#050505]/80 backdrop-blur-sm">
           <motion.div

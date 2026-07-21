@@ -45,7 +45,8 @@ const createCustomIcon = (
   metricValue: number,
   isSelected: boolean,
   name: string,
-  rainfall: number = 0
+  rainfall: number = 0,
+  metricType: string = ""
 ) => {
   let rainHtml = '';
   if (rainfall > 0) {
@@ -57,6 +58,18 @@ const createCustomIcon = (
       rainHtml += `<div class="rain-drop" style="left: ${left}px; animation-delay: ${delay}s; animation-duration: ${duration}s; height: ${10 + Math.random() * 10}px;"></div>`;
     }
   }
+
+  const formatMetric = (val: number, metric: string) => {
+    if (metric === "population" || metric === "vehicles") {
+      return val >= 1000 ? (val / 1000).toFixed(0) + "k" : val;
+    }
+    if (metric === "density") {
+      return val >= 1000 ? (val / 1000).toFixed(1) + "k" : val;
+    }
+    return Math.round(val);
+  };
+
+  const formattedValue = formatMetric(metricValue, metricType);
 
   const html = `
     <div style="
@@ -100,15 +113,14 @@ const createCustomIcon = (
         background-color: ${color};
         box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
         color: #16171D;
-        font-size: 12px;
+        font-size: ${String(formattedValue).length > 3 ? '10px' : '12px'};
         font-weight: 900;
         letter-spacing: -0.5px;
       ">
-        ${Math.round(metricValue)}
+        ${formattedValue}
       </div>
     </div>
   `;
-
   return L.divIcon({
     html,
     className: "custom-leaflet-icon",
@@ -162,11 +174,23 @@ export default function ChennaiMap({
           } else if (selectedMetric === "rainfall") {
             metricValue = (zone as any).metrics?.rainfall || zone.rainfall || 0;
             color = metricValue > 5 ? "#3B82F6" : "#A1A1AA";
+          } else if (selectedMetric === "humidity") {
+            metricValue = (zone as any).metrics?.humidity || zone.humidity || 0;
+            color = metricValue > 75 ? "#3B82F6" : "#22C55E";
+          } else if (selectedMetric === "vehicles") {
+            metricValue = (zone as any).metrics?.vehicles || zone.vehicles || 0;
+            color = metricValue > 150000 ? "#EF4444" : metricValue > 100000 ? "#F97316" : "#EAB308";
+          } else if (selectedMetric === "population") {
+            metricValue = zone.pop || 0;
+            color = metricValue > 150000 ? "#8B5CF6" : "#A855F7";
+          } else if (selectedMetric === "density") {
+            metricValue = zone.density || 0;
+            color = metricValue > 25000 ? "#EC4899" : "#F472B6";
           }
 
           const position = ZONE_COORDS[zone.id] || { lat: 13.0827, lng: 80.2707 };
           const currentRainfall = (zone as any).metrics?.rainfall || zone.rainfall || 0;
-          const customIcon = createCustomIcon(color, metricValue, isSelected, zone.name, currentRainfall);
+          const customIcon = createCustomIcon(color, metricValue, isSelected, zone.name, currentRainfall, selectedMetric);
 
           return (
             <Marker

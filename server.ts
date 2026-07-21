@@ -516,7 +516,70 @@ Please answer the user's question with precise local knowledge, urban planning s
 User Question: "${prompt}"`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-3.1-flash-lite",
+      contents: fullPrompt,
+    });
+
+    res.json({
+      success: true,
+      text: response.text || "I was unable to formulate a response at this moment.",
+    });
+  } catch (err: any) {
+    console.error("Gemini API Error:", err);
+    res.status(500).json({
+      success: false,
+      message: "Gemini server-side assistant encountered an error.",
+      error: err.message,
+    });
+  }
+});
+
+
+
+// --- SITE PLANNER API ---
+app.post("/api/ai/site-planner", async (req, res) => {
+  const { businessType, requirements } = req.body;
+  if (!businessType) {
+    return res.status(400).json({ success: false, message: "Business type is required." });
+  }
+
+  if (!ai) {
+    return res.json({
+      success: true,
+      text: "Site Planner AI is currently offline. Please set up the GEMINI_API_KEY. Based on general heuristics, Adyar or T. Nagar are primary commercial zones in Chennai.",
+    });
+  }
+
+  try {
+    const allZonesContext = db.zones.map(z => 
+      `Zone ${z.name} (${z.id}): Pop ${z.pop.toLocaleString()} (Density ${z.density}), AQI: ${z.aqi}, Green Cover: ${z.green}%, Vehicles: ${z.vehicles.toLocaleString()}`
+    ).join("\n");
+
+    const fullPrompt = `You are an elite Urban Planner and Commercial Real Estate Strategist specializing in Chennai, India.
+The user is planning to open a new site/business and needs a highly detailed, data-driven, and actionable feasibility report.
+
+Business/Site Type: "${businessType}"
+Additional Requirements/Context: "${requirements || 'None provided'}"
+
+Here is the current environmental and demographic data for Chennai's zones:
+${allZonesContext}
+
+Your task is to provide a comprehensive, deep-dive feasibility analysis. Do NOT just provide a brief summary. Give specific, highly accurate, and actionable advice that a real investor or city planner would use.
+
+Include the following sections:
+1. **Strategic Feasibility Analysis**: Evaluate the viability of this business type in Chennai's current economic and environmental climate.
+2. **Top 3 Zone Recommendations (Deep Dive)**:
+    - Cite the specific data (Population, AQI, Green Cover, etc.) from the provided context.
+    - Mention real-world neighborhoods, streets, or landmarks within those zones.
+    - Discuss specific logistical advantages, demographic alignment, and competitor presence.
+3. **Environmental & Climate Risk Assessment**: Analyze how urban heat, flood risks (typical for Chennai), and pollution in the chosen zones might impact operations or construction, and suggest mitigation strategies.
+4. **Economic & Real Estate Cost Heuristics**: Provide realistic expectations regarding land value premiums, operational costs, and ROI timelines based on the suggested locations.
+5. **Final Actionable Roadmap**: Next immediate steps for the planner/investor.
+
+Format the response using clean, professional Markdown with tables where appropriate to compare zones. Ensure the tone is highly professional, analytical, and tailored to Chennai's unique geography and urban challenges.`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.1-flash-lite",
       contents: fullPrompt,
     });
 
