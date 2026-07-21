@@ -75,3 +75,18 @@
   z-index: 1001;
 }
 
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .prose, .prose * {
+    visibility: visible;
+  }
+  .prose {
+    position: absolute;
+    left: 0;
+    top: 0;
+    color: black !important;
+  }
+}

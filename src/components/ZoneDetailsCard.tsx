@@ -1,12 +1,15 @@
 import React from 'react';
 import { ZoneData } from '../types';
 import { Sparkles } from 'lucide-react';
+import HistoricalChart from './HistoricalChart';
+import { HistoryRecord } from '../types';
 
 interface Props {
   zone: ZoneData;
+  history?: HistoryRecord[];
 }
 
-export default function ZoneDetailsCard({ zone }: Props) {
+export default function ZoneDetailsCard({ zone, history }: Props) {
   if (!zone) return null;
   return (
     <div className="space-y-4">
@@ -72,6 +75,8 @@ export default function ZoneDetailsCard({ zone }: Props) {
             <span className="text-sm font-mono text-[#E0E0E0]">{(zone.vehicles / 1000).toFixed(0)}k</span>
          </div>
       </div>
+
+      {history && history.length > 0 && <HistoricalChart zoneId={zone.id} history={history} />}
 
       {/* Machine Learning / Random Forest Prediction Predictor */}
       <div className="mt-2 flex flex-col gap-2">

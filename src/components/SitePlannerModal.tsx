@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { X, Map, Building, Sparkles, Loader2 } from 'lucide-react';
+import { X, Map, Building, Sparkles, Loader2, Download, Printer } from 'lucide-react';
 import Markdown from 'react-markdown';
 
 interface SitePlannerModalProps {
@@ -119,9 +119,35 @@ export default function SitePlannerModal({ isOpen, onClose }: SitePlannerModalPr
 
             <div className="bg-[#1C1D24] border border-[#2D2D35] rounded-xl p-5 h-[350px] overflow-y-auto">
               {result ? (
-                <div className="prose prose-invert prose-sm max-w-none text-[#E0E0E0] prose-headings:text-white prose-a:text-indigo-400">
-                  <div className="markdown-body">
-                    <Markdown>{result}</Markdown>
+                <div className="flex flex-col h-full">
+                  <div className="flex justify-end gap-2 mb-2 pb-2 border-b border-[#2D2D35] shrink-0">
+                    <button 
+                      onClick={() => {
+                        const blob = new Blob([result], { type: 'text/markdown' });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `Chennai_Site_Plan_${businessType.replace(/\s+/g, '_')}.md`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      }}
+                      className="px-2 py-1 rounded bg-[#2D2D35] hover:bg-indigo-500/20 text-[#A1A1AA] hover:text-indigo-400 text-[10px] font-bold flex items-center gap-1.5 transition-colors"
+                    >
+                      <Download className="w-3 h-3" /> EXPORT MD
+                    </button>
+                    <button 
+                      onClick={() => {
+                        window.print();
+                      }}
+                      className="px-2 py-1 rounded bg-[#2D2D35] hover:bg-indigo-500/20 text-[#A1A1AA] hover:text-indigo-400 text-[10px] font-bold flex items-center gap-1.5 transition-colors"
+                    >
+                      <Printer className="w-3 h-3" /> PRINT
+                    </button>
+                  </div>
+                  <div className="prose prose-invert prose-sm max-w-none text-[#E0E0E0] prose-headings:text-white prose-a:text-indigo-400 overflow-y-auto pr-2 no-scrollbar">
+                    <div className="markdown-body">
+                      <Markdown>{result}</Markdown>
+                    </div>
                   </div>
                 </div>
               ) : (

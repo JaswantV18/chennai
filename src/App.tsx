@@ -604,13 +604,13 @@ export default function App() {
           <div className={`flex gap-4 mb-4 ${compareZoneId ? 'flex-row' : 'flex-col'}`}>
             {activeZone && (
               <div className={compareZoneId ? "w-1/2" : "w-full"}>
-                <ZoneDetailsCard zone={activeZone} />
+                <ZoneDetailsCard zone={activeZone} history={historicalLogs} />
               </div>
             )}
             
             {compareZoneId && compareZone && (
               <div className="w-1/2 border-l border-[#2D2D35] pl-4">
-                <ZoneDetailsCard zone={compareZone} />
+                <ZoneDetailsCard zone={compareZone} history={historicalLogs} />
               </div>
             )}
           </div>
