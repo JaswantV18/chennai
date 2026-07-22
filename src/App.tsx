@@ -1,5 +1,6 @@
 import React, { useState, useEffect, FormEvent } from "react";
 import { motion } from "motion/react";
+import Markdown from "react-markdown";
 import {
   ZoneData,
   SelectedMetric,
@@ -63,7 +64,7 @@ export default function App() {
   // AI Assistant chat state
   const [chatPrompt, setChatPrompt] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
-  const [chatMessages, setChatMessages] = useState<Array<{ sender: "user" | "ai"; text: string }>>([
+  const [chatMessages, setChatMessages] = useState<Array<{ sender: "user" | "ai"; text: string; sources?: {uri: string, title: string}[] }>>([
     {
       sender: "ai",
       text: "Greetings! I am the Chennai Sustainability AI Advisor. Click any zone to explore active environmental telemetry, and ask me custom urban planning or policy questions below.",
@@ -261,7 +262,7 @@ export default function App() {
       if (res.headers.get("content-type")?.includes("text/html")) throw new Error("Proxy error");
       const data = await res.json();
       if (data.success) {
-        setChatMessages((prev) => [...prev, { sender: "ai", text: data.text }]);
+        setChatMessages((prev) => [...prev, { sender: "ai", text: data.text, sources: data.sources }]);
       } else {
         setChatMessages((prev) => [
           ...prev,
@@ -621,10 +622,10 @@ export default function App() {
                   <MessageSquare className="w-3.5 h-3.5 text-[#3B82F6]" />
                   <div>
                     <h4 className="text-[11px] font-bold text-white uppercase tracking-widest">
-                      Policy Assistant
+                      AI Search Assistant
                     </h4>
                     <p className="text-[8px] font-mono text-[#52525B]">
-                      Powered by Gemini 3.5 Flash
+                      Powered by Gemini & Google Search
                     </p>
                   </div>
                 </div>
@@ -640,7 +641,17 @@ export default function App() {
                           : "bg-[#1C1D24] text-[#E0E0E0] mr-4 border border-[#2D2D35]"
                       }`}
                     >
-                      {msg.text}
+                      <Markdown>{msg.text}</Markdown>
+                      {msg.sources && msg.sources.length > 0 && (
+                        <div className="mt-2 pt-2 border-t border-[#2D2D35]/50 flex flex-col gap-1">
+                          <span className="text-[8px] uppercase tracking-wider text-[#71717A]">Sources:</span>
+                          {msg.sources.map((s, idx) => (
+                            <a key={idx} href={s.uri} target="_blank" rel="noopener noreferrer" className="text-[#3B82F6] hover:underline truncate">
+                              {s.title || s.uri}
+                            </a>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
                   {chatLoading && (
@@ -656,7 +667,7 @@ export default function App() {
                     type="text"
                     value={chatPrompt}
                     onChange={(e) => setChatPrompt(e.target.value)}
-                    placeholder="Ask about policies..."
+                    placeholder="Ask anything, searching live..."
                     className="flex-1 bg-[#0A0B10] border border-[#2D2D35] rounded py-1.5 px-2.5 text-[10px] text-white focus:outline-none focus:border-[#3B82F6]"
                   />
                   <button

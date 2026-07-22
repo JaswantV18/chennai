@@ -23,16 +23,8 @@ const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 10, // limit each IP to 10 requests per windowMs
   message: "Too many authentication attempts, please try again later",
-  validate: { trustProxy: false, xForwardedForHeader: false },
-  keyGenerator: (req) => {
-    // If running behind a proxy like in AI Studio, prefer x-forwarded-for
-    const xForwardedFor = req.headers['x-forwarded-for'];
-    if (xForwardedFor) {
-      if (Array.isArray(xForwardedFor)) return xForwardedFor[0];
-      return xForwardedFor.split(',')[0];
-    }
-    return req.ip || "unknown_ip";
-  }
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
 
@@ -504,25 +496,29 @@ app.post("/api/ai/chat", async (req, res) => {
       }
     }
 
-    const fullPrompt = `You are the Chennai Sustainability AI Advisor, an expert in urban planning, climate resilience, and environmental metrics.
-Context:
-${zoneContext || "The user is looking at the overall Chennai city-wide dashboard."}
-
-Global Metrics Available: Air Quality Index (AQI), Temperature, Humidity, Rainfall, Vehicle Count, Population, and Population Density.
-Chennai's 16 Zones include standard monitoring stations as well as newly integrated stations: Kodungaiyur (North, dumpyard/heavy industry), Koyambedu (West, wholesale market/major transit hub), Perungudi (South, IT corridor/southern landfill), and Kathivakkam (North, port/power complexes).
-
-Please answer the user's question with precise local knowledge, urban planning strategies specific to Chennai, and actionable environmental advice. Keep your response highly readable, structured, and informative.
-
-User Question: "${prompt}"`;
+    const fullPrompt = `You are an AI Search Assistant embedded in the Chennai Sustainability Dashboard. You have access to real-time search to answer any user queries. Although your primary context is Chennai Sustainability, you can answer general queries as well using your search capabilities.\n\nContext:\n${zoneContext || "The user is looking at the overall Chennai city-wide dashboard."}\n\nPlease answer the user's question accurately using search if needed. Keep your response highly readable, structured, and informative.\n\nUser Question: "${prompt}"`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.1-flash-lite",
+      model: "gemini-2.5-flash",
       contents: fullPrompt,
+      config: {
+        tools: [{ googleSearch: {} }],
+      },
     });
+
+    
+    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+    let sources = [];
+    if (chunks) {
+      sources = chunks
+        .filter(c => c.web)
+        .map(c => ({ uri: c.web.uri, title: c.web.title }));
+    }
 
     res.json({
       success: true,
       text: response.text || "I was unable to formulate a response at this moment.",
+      sources,
     });
   } catch (err: any) {
     console.error("Gemini API Error:", err);
@@ -579,7 +575,7 @@ Include the following sections:
 Format the response using clean, professional Markdown with tables where appropriate to compare zones. Ensure the tone is highly professional, analytical, and tailored to Chennai's unique geography and urban challenges.`;
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.1-flash-lite",
+      model: "gemini-2.5-flash",
       contents: fullPrompt,
     });
 
