@@ -622,10 +622,10 @@ export default function App() {
                   <MessageSquare className="w-3.5 h-3.5 text-[#3B82F6]" />
                   <div>
                     <h4 className="text-[11px] font-bold text-white uppercase tracking-widest">
-                      AI Search Assistant
+                      AI Policy Assistant
                     </h4>
                     <p className="text-[8px] font-mono text-[#52525B]">
-                      Powered by Gemini & Google Search
+                      Powered by Gemini 3.6 Flash
                     </p>
                   </div>
                 </div>
@@ -667,7 +667,7 @@ export default function App() {
                     type="text"
                     value={chatPrompt}
                     onChange={(e) => setChatPrompt(e.target.value)}
-                    placeholder="Ask anything, searching live..."
+                    placeholder="Ask about policies..."
                     className="flex-1 bg-[#0A0B10] border border-[#2D2D35] rounded py-1.5 px-2.5 text-[10px] text-white focus:outline-none focus:border-[#3B82F6]"
                   />
                   <button
